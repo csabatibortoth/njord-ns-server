@@ -1,11 +1,10 @@
-# node-named - DNS Server in Node.js
+# Njord NS Server - DNS Server in Node.js
 
-Node-named is a lightweight DNS server written in pure javascript. It has
+Njord NS Server based on Node-named is a lightweight DNS server written in pure javascript. It has
 limited support for the DNS spec, but aims to implement all of the *common*
-functionality that is in use today. 
+functionality that is in use today.
 
-** This project is not actively maintained **
-I've received a lot of great PRs for this project, but I don't have the capacity to actively maintain this library at the moment. I feel strongly about maintaining backwards compatibility for people who rely on it, so any PRs would also need to adhere to keeping the API sane, or contribute to some improvement in performance.
+
 
 
 
@@ -29,15 +28,15 @@ server.on('query', function(query) {
 ```
 ## Creating DNS Records
 
-node-named provides helper functions for creating DNS records. 
+node-named provides helper functions for creating DNS records.
 The records are available under 'named.record.NAME' where NAME is one
-of ['A', 'AAAA', 'CNAME', 'SOA', 'MX', 'NS', 'TXT, 'SRV']. It is important to 
-remember that these DNS records are not permanently added to the server. 
+of ['A', 'AAAA', 'CNAME', 'SOA', 'MX', 'NS', 'TXT, 'SRV']. It is important to
+remember that these DNS records are not permanently added to the server.
 They only exist for the length of the particular request. After that, they are
 destroyed. This means you have to create your own lookup mechanism.
 ```javascript
 var named = require('node-named');
-    
+
 var soaRecord = new named.SOARecord('example.com', {serial: 201205150000});
 console.log(soaRecord);
 ```
@@ -84,5 +83,5 @@ basis).
 
 ## Looking up Records
 
-There are a few handy ways to lookup DNS records in node. 
+There are a few handy ways to lookup DNS records in node.
 https://github.com/LCMApps/dns-lookup-cache
