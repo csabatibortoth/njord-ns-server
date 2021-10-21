@@ -4,7 +4,7 @@ var cluster = require('cluster');
 /**
  *
  * <div>
- * Example that uses cluster (http://nodejs.org/api/cluster.html) to 
+ * Example that uses cluster (http://nodejs.org/api/cluster.html) to
  * spin up multiple workers to handle requests.
  * </div>
  *
