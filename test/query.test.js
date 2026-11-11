@@ -74,6 +74,52 @@ test('reject invalid answers', () => {
   assert.deepEqual(query.answers(), []);
 });
 
+test('reject an invalid ttl', () => {
+  const query = createQuery();
+  const record = new named.ARecord('127.0.0.1');
+  assert.throws(() => query.addAnswer('example.com', record, -1), RangeError);
+  assert.throws(() => query.addAnswer('example.com', record, 1.5), RangeError);
+  assert.throws(() => query.addAnswer('example.com', record, 2147483648),
+                RangeError);
+  query.addAnswer('example.com', record, 2147483647);
+  assert.equal(query.answers().length, 1);
+});
+
+test('set the response code', () => {
+  const query = createQuery();
+  const codes = {
+    eformat: 1, eserver: 2, enoname: 3, enotimp: 4, erefuse: 5, enoerr: 0
+  };
+  for (const name of Object.keys(codes)) {
+    query.setError(name);
+    assert.equal(query._flags.rcode, codes[name]);
+  }
+  query.setError('DNS_ENONAME');
+  assert.equal(query._flags.rcode, named.Protocol.DNS_ENONAME);
+
+  assert.throws(() => query.setError('nope'), /invalid error code/);
+  assert.throws(() => query.setError(3), /invalid error code/);
+
+  query.encode();
+  assert.equal(query._raw.buf[3] & 0x0f, 3);
+});
+
+test('encode a query as several messages', () => {
+  const query = createQuery();
+  for (let i = 0; i < 10; i++)
+    query.addAnswer(query.name(), new named.ARecord('127.0.0.' + i));
+
+  const messages = query.encodeMessages(sample.raw.length + 5 * 16);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].readUInt16BE(6), 5);
+  assert.equal(messages[1].readUInt16BE(6), 5);
+  assert.equal(query._raw.buf, messages[0]);
+});
+
+test('a query that was not received over tcp uses udp', () => {
+  assert.equal(createQuery().transport(), 'udp');
+});
+
 test('respond requires a server', () => {
   assert.throws(() => createQuery().respond());
 });

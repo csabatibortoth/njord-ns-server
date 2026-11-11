@@ -77,6 +77,8 @@ options is an object which may specify:
 
 - log: an optional bunyan logger
 - name: an optional name used to identify the server
+- tcpTimeout: the number of milliseconds after which an idle TCP connection is
+  closed. Defaults to 30000, and 0 disables the timeout.
 
 Here is an example a named server listening on port 53
 
@@ -99,6 +101,17 @@ This function is asyncronous. Whenever the server is litening a `listen` event
 will be emitted. The last parameter `onListen` will be executed but not attached
 to the listen event, when the server is listening.
 
+### server.listenTcp(port, [host], [onListen])
+
+Start accepting TCP connections on the specified `port` and `host`, next to
+or instead of the UDP socket of `server.listen`. TCP is what clients use for
+zone transfers (AXFR), and for answers that are too large for UDP.
+
+Queries that arrive over TCP are emitted with the same `query` event, and are
+answered with the same `server.send`. A client may send several queries over
+one connection. A response of more than 65535 bytes is sent as several DNS
+messages, which is how a large zone is transferred.
+
 ### server.send(queryResponse)
 
 Sends a `queryResponse` message. The queryResponse includes information about
@@ -111,8 +124,8 @@ will send a 'null-response' DNS message. This is the equivalent of an HTTP 404.
 
 ### server.close(onClose)
 
-Stops listening and closes the socket. `onClose` is an optional callback that
-will be attached to the underlying socket `close` event.
+Stops listening, on UDP as well as on TCP, and closes the open TCP connections.
+`onClose` is an optional callback that is called once everything is closed.
 
 ### Event: 'listening'
 
@@ -190,6 +203,22 @@ are responding with. In most cases this will be what the query.type() returns,
 but for instances like an 'A' or 'AAAA' request you may elect to respond with a
 CNAME record. 
 
+### query.transport()
+
+Returns `'udp'` or `'tcp'`, depending on how the query was received. A zone
+transfer (a query of the type 'AXFR') should only be answered over TCP.
+
+### query.setError(name)
+
+Sets the response code of the query. `name` is one of:
+
+- `'enoerr'`: no error, which is the default
+- `'eformat'`: the query could not be interpreted
+- `'eserver'`: the server failed to process the query
+- `'enoname'`: the name does not exist
+- `'enotimp'`: the kind of query is not implemented
+- `'erefuse'`: the server refuses to answer, for policy reasons
+
 ### query.operation()
 
 Returns the type of operation that the client is requesting. In almost all cases
@@ -201,6 +230,68 @@ this will be 'query'. Valid operations are 'query', 'status', 'notify', and
 Encodes the query and stores the results as a `buffer` in the query itself.
 This function should never need to be invoked, as the `server.send` function
 will automatically encode a query prior to being sent to the client.
+
+### query.encodeMessages(maxSize)
+
+Encodes the query as an array of buffers, each of which is a DNS message of at
+most `maxSize` bytes with as many of the answers as fit. This is what
+`server.send` uses for a query that was received over TCP.
+
+## Class: named.Recursor
+
+A DNS client that answers queries by asking other DNS servers. The lookups are
+made with the resolver of Node.js, which is built on c-ares.
+
+### named.createRecursor([options])
+
+options is an object which may specify:
+
+- servers: an array with the addresses of the servers to ask, each with an
+  optional port (`'192.0.2.1'`, `'192.0.2.1:5353'`, `'[2001:db8::1]:53'`).
+  Defaults to the DNS servers of the system.
+- timeout: the number of milliseconds to wait for an answer to each attempt
+- tries: the number of attempts that are made for each lookup
+- ttl: the ttl of the answers for which the server that was asked does not
+  report one, which it only does for A and AAAA records. Defaults to 60.
+
+### recursor.resolve(query, [callback])
+
+Looks up the question of a `query`, and adds what is found to it as answers.
+When the lookup fails the response code of the query is set instead: to
+'enoname' for a name that does not exist, to 'enotimp' for a type that can not
+be looked up, to 'erefuse' when the other server refuses, and to 'eserver' for
+everything else. In either case the query is ready to be sent.
+
+    server.on('query', function(query) {
+      recursor.resolve(query, function() {
+        server.send(query);
+      });
+    });
+
+`callback` is called with an error (which is `null`, as failed lookups are
+reported to the client) and the query. Without a callback a promise for the
+query is returned.
+
+### recursor.lookup(name, type)
+
+Looks up the records of a `type` for a `name`. Returns a promise for an array
+of objects with a `record` (an instance of `named.Record`) and its `ttl`.
+The promise is rejected with the error of the resolver, of which the `code` is
+one of the error codes of the `dns` module of Node.js, such as 'ENOTFOUND' and
+'ENODATA'.
+
+### recursor.types()
+
+Returns the types of record that can be looked up: A, AAAA, CNAME, MX, NS, PTR,
+SOA, SRV and TXT.
+
+### recursor.servers()
+
+Returns the addresses of the servers that are asked.
+
+### recursor.cancel()
+
+Cancels the lookups that are in progress, which then fail.
 
 
 ## Records
@@ -243,6 +334,17 @@ Create an IPv6 resource record.
 Create an Alias record. When these records are sent to the client, the client
 will often make an additional request for the alias itself.
 
+### named.NSRecord(target)
+
+Create a Name Server record. `target` is the name of a server that is
+authoritative for the domain.
+
+### named.PTRRecord(target)
+
+Create a Pointer record, which is the answer to a reverse lookup: a query for a
+name such as `1.2.0.192.in-addr.arpa`. `target` is the name of the host that
+has the address.
+
 ### named.MXRecord(exchange, options)
 
 Create a Mail Server record. A client making this request will often make an
@@ -269,14 +371,21 @@ Options:
 ### named.TXTRecord(target)
 
 Create a text resource record.
-`target` can be any text up to 500 bytes in length
+`target` can be any text. Text of more than 255 bytes is sent as several
+strings, which clients join again.
 
 ## Class: named.Record
 
 ### record.valid()
 
 This function will ensure that the data you used to create the record is in fact
-valid.
+valid. Names must be valid host or domain names, addresses must be valid
+addresses, and numbers must be integers within the range of their field.
+
+### record.invalid()
+
+Returns an array with the names of the properties of the record that hold
+invalid data, which is empty for a valid record.
 
 ## DnsError
 
