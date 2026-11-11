@@ -160,4 +160,4 @@ https://github.com/LCMApps/dns-lookup-cache
 
 ## Release notes
 
-See [RELEASE.md](RELEASE.md) for what changed in 2.0.0.
+See [RELEASE.md](RELEASE.md) for what changed in each release.
