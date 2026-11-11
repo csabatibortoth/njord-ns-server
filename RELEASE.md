@@ -1,3 +1,99 @@
+# Njord NS Server 2.1.0
+
+This release completes the TODO list of the project: PTR records, better
+validation of records, queries over TCP including zone transfers (AXFR), and a
+recursor that answers queries by asking other DNS servers.
+
+Everything is an addition to 2.0.0. Existing servers keep working without
+changes, with the exceptions listed under "Behaviour changes".
+
+## New features
+
+### PTR records
+
+`named.PTRRecord(target)` is the answer to a reverse lookup, such as a query
+for `1.2.0.192.in-addr.arpa`.
+
+### Record validation
+
+- `record.valid()` checks that names are valid host or domain names, that
+  addresses are valid addresses, and that numbers are integers within the
+  range of their field.
+- `record.invalid()` returns the names of the properties that hold invalid
+  data, for example `['target', 'port']`.
+- `query.addAnswer` throws a `RangeError` for a TTL that is not an integer
+  from 0 to 2147483647.
+
+### TCP and zone transfers (AXFR)
+
+- `server.listenTcp(port, [host], [onListen])` accepts queries over TCP, next
+  to or instead of the UDP socket of `server.listen`. `server.close()` closes
+  both.
+- Queries that arrive over TCP are emitted with the same `query` event and
+  answered with the same `server.send`. `query.transport()` returns `'udp'` or
+  `'tcp'`.
+- A zone transfer is a query of the type `AXFR`, answered with the SOA record
+  of the zone, its records, and the SOA record again. A response of more than
+  65535 bytes is split over several DNS messages.
+- Idle connections are closed after 30 seconds, which the `tcpTimeout` option
+  of `createServer` changes.
+
+There is no access control for zone transfers: check `query._client.address`
+before you answer one. See `examples/axfr.js`.
+
+### Recursor
+
+- `named.createRecursor({servers, timeout, tries, ttl})` creates a DNS client
+  on top of the resolver of Node.js (c-ares). Without `servers` it asks the
+  DNS servers of the system.
+- `recursor.resolve(query, [callback])` adds the answers that are found to a
+  query, or sets its response code when the lookup fails, so that the query
+  can be sent either way.
+- `recursor.lookup(name, type)` is the client by itself, and returns a promise
+  for a list of records with their TTL.
+- The A, AAAA, CNAME, MX, NS, PTR, SOA, SRV and TXT records can be looked up.
+
+The resolver only reports the TTL of A and AAAA records. The other records get
+the `ttl` of the recursor, which is 60 seconds by default. See
+`examples/recursor.js`.
+
+### Response codes
+
+`query.setError(name)` sets the response code of a query, with `'enoerr'`,
+`'eformat'`, `'eserver'`, `'enoname'`, `'enotimp'` or `'erefuse'`.
+
+## Behaviour changes
+
+- The target of a SRV record must be a domain name to be valid. It used to be
+  any text of up to 255 characters.
+- The port of a SRV record must be from 1 to 65535 to be valid.
+- An IPv6 address with a zone (`fe80::1%eth0`) is not valid.
+- The TTL of a MX record must be at most 2147483647 to be valid.
+- A TXT record of more than 255 bytes is valid, as it is sent as several
+  strings.
+- Host names may end with a dot, and may be the root (`.`), which is what a
+  null MX record and a SRV record of an unavailable service use.
+- `query.addAnswer` rejects a TTL that is negative, fractional or too large
+  when the answer is added. It used to fail when the response was sent.
+
+## Known limitations
+
+- A response that is too large for UDP is sent as it is. It is not truncated
+  to make the client retry over TCP.
+- `examples/cluster.js` does not run on Windows.
+
+## Testing
+
+```
+npm install
+npm test
+```
+
+The 105 tests cover the new features with a live server: queries over TCP, a
+zone transfer of 6000 records, and a recursor that asks a second server.
+
+---
+
 # Njord NS Server 2.0.0
 
 This release modernizes the codebase, updates every dependency, and makes
