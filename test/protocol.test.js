@@ -105,6 +105,11 @@ test('protocol encode: NS', () => {
                 '00 05 02 6e 73 c0 0c');
 });
 
+test('protocol encode: PTR', () => {
+  assertEncodes('PTR', new named.PTRRecord('host.example.com'), '0c',
+                '00 07 04 68 6f 73 74 c0 0c');
+});
+
 test('protocol encode: MX', () => {
   assertEncodes('MX', new named.MXRecord('smtp.example.com', {priority: 10}),
                 '0f', '00 09 00 0a 04 73 6d 74 70 c0 0c');
@@ -150,6 +155,40 @@ test('protocol encode: message larger than the initial buffer', () => {
   assert.deepEqual([...encoded.subarray(encoded.length - 4)], [10, 0, 0, 99]);
 });
 
+test('protocol encode: answers split over several messages', () => {
+  const records = [];
+  for (let i = 0; i < 100; i++)
+    records.push(new named.ARecord('10.0.0.' + i));
+  const message = answerMessage('A', records);
+
+  // room for the header, the question and 10 answers
+  const size = 12 + 17 + 10 * 16;
+  const messages = protocol.encodeAnswerMessages(message, size + 15);
+  assert.equal(messages.length, 10);
+  for (const [i, encoded] of messages.entries()) {
+    assert.equal(encoded.length, size);
+    assert.equal(encoded.readUInt16BE(6), 10);
+    assert.deepEqual([...encoded.subarray(-4)], [10, 0, 0, i * 10 + 9]);
+    // every message starts with the same header and question
+    assert.ok(encoded.subarray(0, 6).equals(messages[0].subarray(0, 6)));
+    assert.ok(encoded.subarray(8, 29).equals(messages[0].subarray(8, 29)));
+  }
+
+  // everything fits in one message, which then equals a regular encode
+  const single = protocol.encodeAnswerMessages(message, 65535);
+  assert.equal(single.length, 1);
+  assert.ok(single[0].equals(protocol.encode(message, 'answerMessage')));
+
+  // no answers at all
+  const empty = protocol.encodeAnswerMessages(answerMessage('A', []), 512);
+  assert.equal(empty.length, 1);
+  assert.equal(empty[0].length, 12 + 17);
+
+  // an answer that does not fit by itself
+  assert.throws(() => protocol.encodeAnswerMessages(message, 12 + 17 + 15),
+                RangeError);
+});
+
 test('protocol encode: trailing dot and root names', () => {
   const fqdn = protocol.encode({ name: 'example.com.', type: 1, qclass: 1 },
                                'question');
@@ -178,6 +217,6 @@ test('protocol encode: rejects invalid data', () => {
                 RangeError);
   assert.throws(() => encode('CNAME', new named.CNAMERecord('a'.repeat(64))),
                 RangeError);
-  assert.throws(() => encode('PTR', { target: 'example.com' }),
+  assert.throws(() => encode('HINFO', { target: 'example.com' }),
                 /unrecognized nsdata type/);
 });
